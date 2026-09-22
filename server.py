@@ -110,9 +110,21 @@ if __name__ == '__main__':
 
     def _port_usable(p):
         """先探测能否绑定：Windows 上 5888 有可能落在 Hyper-V/WSL 的保留端口段里，
-        或者被其它程序占用，此时直接 bind 会以 WSAEACCES 失败。"""
+        或者被其它程序占用，此时直接 bind 会以 WSAEACCES 失败。
+
+        注意 SO_REUSEADDR 在 Windows 与 Unix 上语义不同：
+          - Unix：仅影响 TIME_WAIT 状态，仍会拒绝已被绑定的端口 → 可安全启用；
+          - Windows：允许绑定**已被其它 socket 占用**的地址（相当于劫持），
+            会把"端口已被占用"误判成可用。若启用它，重复启动第二个实例时探测
+            会误报可用，两个进程抢同一端口，浏览器连到哪个不确定。
+        因此 Windows 上改用 SO_EXCLUSIVEADDRUSE 明确排他。
+        """
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as _s:
-            _s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            if platform.system() == 'Windows':
+                if hasattr(socket, 'SO_EXCLUSIVEADDRUSE'):
+                    _s.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+            else:
+                _s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             try:
                 _s.bind(('0.0.0.0', p))
                 return True

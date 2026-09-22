@@ -146,6 +146,9 @@ def handle_scroll(data):
     
 ## 更新日志
 
+2026-09-22 Windows 单文件版 v1.0.1
+- [x]  修复端口探测在 Windows 上的误判：`SO_REUSEADDR` 在 Windows 与 Unix 上语义不同 —— Unix 下它只影响 `TIME_WAIT`，Windows 下却允许绑定**已被其它 socket 占用**的地址。由于 werkzeug 自身会设置 `allow_reuse_address`，重复启动第二个实例时探测会把"端口已被占用"误判为可用，两个进程抢同一端口、浏览器连到哪个不确定。Windows 上改用 `SO_EXCLUSIVEADDRUSE` 明确排他，第二个实例现在会正确顺延（实测 `5892` → `5893`）—— [下载](https://github.com/gubinnt/AirMouse/releases/tag/v1.0.1)
+
 2026-09-22 Windows 单文件版 v1.0.0
 - [x]  新增 Windows 免安装单文件打包，产出 `AirMouseServer.exe`（约 16.5 MB），双击即用、无需装 Python —— [下载](https://github.com/gubinnt/AirMouse/releases/tag/v1.0.0)
 - [x]  修复端口落在系统保留段内导致无法启动：`5888` 可能被 Hyper-V / WSL 划走（本机实测保留段 `5792-5891`），绑定会以 `WSAEACCES (10013)` 失败；现在启动前自动探测端口，被占则向后回退，也可用 `AIRMOUSE_PORT` 指定
