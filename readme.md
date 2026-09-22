@@ -98,6 +98,11 @@ python server.py
 注意，浏览器会提示网页不安全，需要手工点进去信任，因为我们用的是自签的证书
 > CHROME 浏览器安全限制，只有https网页才能传输陀螺仪数据。
 
+**手机端建议使用 Edge / Chrome 打开。** 部分手机自带浏览器（尤其国产 ROM 定制版、
+UC、夸克等）遇到自签证书时不会给出「继续访问」的入口，页面会一直转圈加载不出来，
+看着像服务没起来，其实是浏览器策略问题。换成 Edge / Chrome 后，点一次
+「高级 → 继续前往 xxx（不安全）」即可正常使用。
+
 ---
 
 ## 📂 项目结构
@@ -147,6 +152,7 @@ def handle_scroll(data):
 - [x]  修复 Windows 控制台打印 emoji（`print("🚀 ...")`）抛 `UnicodeEncodeError` 导致进程直接退出，启动时把控制台切到 UTF-8
 - [x]  修复打包后证书 / 配置文件相对路径失效：改为首次运行自动把 `cert.pem`、`key.pem`、`macro_configs.json`、`gamepad_configs.json` 释放到 exe 同目录
 - [x]  补入 `gyro/`、`laji/` 下的调试页到 `templates/`，`/t` 与 `/test` 路由不再 500
+- [x]  文档补充免安装版用法与手机端浏览器建议：手机自带浏览器（国产 ROM 定制版 / UC / 夸克等）遇到自签证书可能不给「继续访问」入口，页面一直转圈，建议改用 Edge / Chrome
 
 2026-01-23 Day3
 - [x]  两个手指快速抬起导致识别成鼠标跳转修复
