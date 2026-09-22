@@ -106,7 +106,30 @@ def on_key(data): keyboard_service.handle_key_action(data)
 def on_combo(data): keyboard_service.handle_combo(data)
 
 if __name__ == '__main__':
-    port = 5888
+    import socket
+
+    def _port_usable(p):
+        """先探测能否绑定：Windows 上 5888 有可能落在 Hyper-V/WSL 的保留端口段里，
+        或者被其它程序占用，此时直接 bind 会以 WSAEACCES 失败。"""
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as _s:
+            _s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            try:
+                _s.bind(('0.0.0.0', p))
+                return True
+            except OSError:
+                return False
+
+    requested_port = int(os.environ.get('AIRMOUSE_PORT') or 5888)
+    if _port_usable(requested_port):
+        port = requested_port
+    else:
+        port = next(
+            (p for p in range(requested_port + 1, requested_port + 100) if _port_usable(p)),
+            requested_port,
+        )
+        print(f"\n⚠️  端口 {requested_port} 不可用（被占用或被系统保留），已自动改用 {port}")
+        print("   （可用环境变量 AIRMOUSE_PORT 指定端口）")
+
     ips = get_all_ip_addresses()
     
     print("\n" + "═"*60)
@@ -125,7 +148,7 @@ if __name__ == '__main__':
     socketio.run(
         app, 
         host='0.0.0.0', 
-        port=5888, 
+        port=port, 
         ssl_context=('cert.pem', 'key.pem'),
         allow_unsafe_werkzeug=True # 确保稳定性
     )
