@@ -1,0 +1,449 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>AirMouse 链路诊断</title>
+<style>
+    * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    :root {
+        --ink: #1f2430;
+        --muted: #6b7280;
+        --line: #e6e8ee;
+        --accent: #2563eb;
+        --warn: #dc2626;
+        --ok: #059669;
+        --bg: #f6f7f9;
+        --soft: #fbfbfd;
+    }
+    body {
+        background: var(--bg);
+        color: var(--ink);
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+        font-size: 15px;
+        line-height: 1.5;
+        padding: 16px;
+        padding-bottom: 40px;
+    }
+    .head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+    h1 { font-size: 18px; font-weight: 600; }
+    h2 { font-size: 13px; font-weight: 600; color: var(--muted); margin-bottom: 10px; letter-spacing: .02em; }
+    .back { font-size: 13px; color: var(--accent); text-decoration: none; }
+    .badge {
+        font-size: 13px; padding: 4px 10px; border-radius: 999px;
+        background: #eef2ff; color: var(--accent); white-space: nowrap;
+    }
+    .badge.bad { background: #fef2f2; color: var(--warn); }
+    .badge.ok { background: #ecfdf5; color: var(--ok); }
+    .card {
+        background: #fff; border: 1px solid var(--line); border-radius: 12px;
+        padding: 14px; margin-top: 14px;
+    }
+    .kv { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; padding: 7px 0; border-bottom: 1px solid var(--line); }
+    .kv:last-child { border-bottom: 0; }
+    .kv span { color: var(--muted); font-size: 14px; }
+    .kv b { font-variant-numeric: tabular-nums; font-weight: 600; text-align: right; }
+    .kv b.bad { color: var(--warn); }
+    .kv b.ok { color: var(--ok); }
+    canvas { width: 100%; height: 150px; display: block; border-radius: 8px; background: var(--soft); }
+    .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 12px; }
+    .stats > div { background: var(--bg); border-radius: 8px; padding: 8px 10px; }
+    .stats span { display: block; font-size: 12px; color: var(--muted); }
+    .stats b { font-size: 15px; font-variant-numeric: tabular-nums; font-weight: 600; }
+    .stats b.bad { color: var(--warn); }
+    .tip { font-size: 13px; color: var(--muted); margin-bottom: 10px; }
+    #pad {
+        height: 110px; border: 1px dashed var(--line); border-radius: 10px;
+        display: flex; align-items: center; justify-content: center;
+        color: var(--muted); font-size: 14px;
+        touch-action: none; user-select: none; -webkit-user-select: none;
+        background: var(--soft);
+    }
+    #pad.on { border-color: var(--accent); color: var(--accent); background: #eef2ff; border-style: solid; }
+    #verdict .l { font-size: 14px; line-height: 1.65; padding: 8px 0; border-bottom: 1px solid var(--line); }
+    #verdict .l:last-child { border-bottom: 0; }
+    #verdict .l b { font-weight: 600; }
+    .btn {
+        margin-top: 12px; width: 100%; padding: 10px; font-size: 14px; font-family: inherit;
+        color: var(--ink); background: #fff; border: 1px solid var(--line);
+        border-radius: 10px; cursor: pointer;
+    }
+    .btn:active { background: var(--bg); }
+</style>
+</head>
+<body>
+
+<div class="head">
+    <h1>链路诊断</h1>
+    <div id="conn" class="badge">连接中…</div>
+</div>
+
+<div class="card">
+    <h2>连接</h2>
+    <div class="kv"><span>传输方式</span><b id="transport">—</b></div>
+    <div class="kv"><span>屏幕刷新率</span><b id="fps">—</b></div>
+    <div class="kv"><span>断开 / 重连次数</span><b id="drops">0 / 0</b></div>
+    <div class="kv"><span>待确认探测包</span><b id="inflight">0</b></div>
+</div>
+
+<div class="card">
+    <h2>往返延迟 RTT（最近 60 秒）</h2>
+    <canvas id="chart"></canvas>
+    <div class="stats">
+        <div><span>当前</span><b id="s-now">—</b></div>
+        <div><span>平均</span><b id="s-avg">—</b></div>
+        <div><span>P95</span><b id="s-p95">—</b></div>
+        <div><span>最大</span><b id="s-max">—</b></div>
+        <div><span>抖动 σ</span><b id="s-jit">—</b></div>
+        <div><span>丢包</span><b id="s-lost">0</b></div>
+    </div>
+</div>
+
+<div class="card">
+    <h2>负载测试</h2>
+    <p class="tip">按住下面区域滑动，按真实触控板的频率发包（不会移动电脑光标）。用空闲和负载两组数据对比，能看出空口竞争有多严重。</p>
+    <div id="pad">按住滑动</div>
+    <div class="kv" style="margin-top:12px"><span>上行发包速率</span><b id="pps">0 /秒</b></div>
+    <div class="kv"><span>空闲时 RTT 抖动 σ</span><b id="s-idle">—</b></div>
+    <div class="kv"><span>负载时 RTT 抖动 σ</span><b id="s-load">—</b></div>
+    <div class="kv"><span>上行到达间隔 σ（服务端测）</span><b id="s-gap">—</b></div>
+</div>
+
+<div class="card">
+    <h2>诊断结论</h2>
+    <div id="verdict"><div class="l" style="color:var(--muted)">收集数据中，请保持页面打开 30 秒以上…</div></div>
+</div>
+
+<button class="btn" id="reset">清空统计重新测</button>
+
+<script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+<script>
+(function () {
+    // 注意：这里故意用默认配置建连，不做任何传输方式优化 ——
+    // 诊断页面必须还原线上真实情况，否则测不到 polling 降级这类问题。
+    const socket = io();
+
+    const $ = (id) => document.getElementById(id);
+
+    const PROBE_INTERVAL = 100;   // 探测包间隔 ms
+    const PROBE_TIMEOUT = 2000;   // 超时判定 ms
+    const WINDOW_MS = 60000;      // 曲线窗口
+    const CAPACITY = 900;
+
+    let seq = 0;
+    let sentTotal = 0, lostTotal = 0, drops = 0, reconnects = 0;
+    let samples = [];             // {t, rtt, load}
+    let gapSamples = [];          // 服务端测的上行到达间隔
+    const pending = new Map();
+    let procMs = null;
+
+    let loadOn = false;
+    let loadSent = 0, loadPps = 0;
+    let frameCount = 0, frameFps = 0, frameT0 = performance.now();
+
+    // ── 统计工具 ────────────────────────────────────────────
+    function mean(a) { if (!a.length) return 0; let s = 0; for (const v of a) s += v; return s / a.length; }
+    function std(a) {
+        if (a.length < 2) return 0;
+        const m = mean(a);
+        let s = 0;
+        for (const v of a) s += (v - m) * (v - m);
+        return Math.sqrt(s / (a.length - 1));
+    }
+    function pct(a, p) {
+        if (!a.length) return 0;
+        const s = a.slice().sort((x, y) => x - y);
+        const i = Math.min(s.length - 1, Math.max(0, Math.round((s.length - 1) * p)));
+        return s[i];
+    }
+    function hasData() { return samples.length > 3; }
+
+    // ── 探测循环 ────────────────────────────────────────────
+    function probe() {
+        const id = ++seq;
+        const t0 = performance.now();
+        const load = loadOn;
+        pending.set(id, t0);
+        sentTotal++;
+
+        socket.emit('diag_ping', { t: t0, load: load }, (resp) => {
+            if (!pending.has(id)) return;      // 已按超时计过
+            const start = pending.get(id);
+            pending.delete(id);
+            const rtt = performance.now() - start;
+            samples.push({ t: performance.now(), rtt: rtt, load: load });
+            if (samples.length > CAPACITY) samples.shift();
+            if (resp) {
+                if (typeof resp.gap === 'number') {
+                    gapSamples.push(resp.gap);
+                    if (gapSamples.length > 300) gapSamples.shift();
+                }
+                if (typeof resp.proc === 'number') procMs = resp.proc;
+            }
+        });
+
+        setTimeout(() => {
+            if (pending.has(id)) { pending.delete(id); lostTotal++; }
+        }, PROBE_TIMEOUT);
+
+        $('inflight').textContent = pending.size;
+    }
+    setInterval(probe, PROBE_INTERVAL);
+
+    // ── 负载模式：按帧发包，模拟真实触控板流量 ────────────────
+    const pad = $('pad');
+
+    function loadFrame() {
+        if (loadOn) {
+            socket.emit('diag_load', { t: performance.now() });
+            loadSent++;
+        }
+    }
+
+    pad.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        loadOn = true;
+        pad.classList.add('on');
+        pad.textContent = '松开结束';
+    }, { passive: false });
+
+    pad.addEventListener('touchmove', (e) => { e.preventDefault(); }, { passive: false });
+
+    const stopLoad = (e) => {
+        if (e) e.preventDefault();
+        loadOn = false;
+        pad.classList.remove('on');
+        pad.textContent = '按住滑动';
+    };
+    pad.addEventListener('touchend', stopLoad, { passive: false });
+    pad.addEventListener('touchcancel', stopLoad, { passive: false });
+
+    // ── 帧循环：负载发包 + 刷新率统计 + 曲线重绘 ───────────────
+    function frameLoop() {
+        loadFrame();
+
+        frameCount++;
+        const now = performance.now();
+        if (now - frameT0 >= 1000) {
+            frameFps = frameCount * 1000 / (now - frameT0);
+            frameCount = 0; frameT0 = now;
+            loadPps = loadSent; loadSent = 0;
+            $('fps').textContent = frameFps.toFixed(0) + ' Hz';
+            $('pps').textContent = loadPps + ' /秒';
+        }
+        requestAnimationFrame(frameLoop);
+    }
+    requestAnimationFrame(frameLoop);
+
+    // ── 状态刷新 ────────────────────────────────────────────
+    function transport() {
+        try { return socket.io.engine.transport.name; } catch (err) { return '未知'; }
+    }
+
+    function refreshStats() {
+        const all = samples.map(s => s.rtt);
+        const idle = samples.filter(s => !s.load).map(s => s.rtt);
+        const load = samples.filter(s => s.load).map(s => s.rtt);
+
+        $('s-now').textContent = all.length ? all[all.length - 1].toFixed(1) + ' ms' : '—';
+        $('s-avg').textContent = all.length ? mean(all).toFixed(1) + ' ms' : '—';
+        $('s-p95').textContent = all.length ? pct(all, 0.95).toFixed(1) + ' ms' : '—';
+        $('s-max').textContent = all.length ? Math.max.apply(null, all).toFixed(1) + ' ms' : '—';
+
+        const jit = std(all);
+        $('s-jit').textContent = all.length > 1 ? jit.toFixed(1) + ' ms' : '—';
+        $('s-jit').className = jit > 15 ? 'bad' : (jit > 6 ? '' : 'ok');
+
+        $('s-lost').textContent = String(lostTotal);
+        $('s-lost').className = lostTotal > 0 ? 'bad' : '';
+
+        $('s-idle').textContent = idle.length > 1 ? std(idle).toFixed(1) + ' ms' : '—';
+        $('s-load').textContent = load.length > 1 ? std(load).toFixed(1) + ' ms' : '—';
+
+        const gs = std(gapSamples);
+        $('s-gap').textContent = gapSamples.length > 1 ? gs.toFixed(1) + ' ms' : '—';
+
+        $('drops').textContent = drops + ' / ' + reconnects;
+
+        const t = transport();
+        const el = $('transport');
+        el.textContent = t;
+        el.className = (t === 'websocket') ? 'ok' : 'bad';
+    }
+
+    function refreshVerdict() {
+        const box = $('verdict');
+        const all = samples.map(s => s.rtt);
+        const idle = samples.filter(s => !s.load).map(s => s.rtt);
+        const load = samples.filter(s => s.load).map(s => s.rtt);
+        const lines = [];
+
+        const t = transport();
+        if (t === 'websocket') {
+            lines.push('<b>传输方式</b>：WebSocket，正常。车轮没被换成方的。');
+        } else {
+            lines.push('<b>传输方式</b>：' + t + ' —— 不是 WebSocket。轮询模式会让每次移动都多等一个往返，抖动也更差。这条要优先修。');
+        }
+
+        if (drops > 0) {
+            lines.push('<b>断连</b>：出现过 ' + drops + ' 次断开。Socket.IO 在断连期间会把消息缓冲起来，重连后一次性补发，表现就是光标卡一下、然后猛地跳一段。');
+        }
+
+        if (all.length > 10) {
+            const jit = std(all);
+            const p95 = pct(all, 0.95);
+            const avg = mean(all);
+            const spread = p95 - avg;
+            if (jit > 15 || spread > 30) {
+                lines.push('<b>抖动</b>：σ=' + jit.toFixed(1) + 'ms，P95 比平均高 ' + spread.toFixed(0) + 'ms —— 抖动明显，这是"一顿一顿"的直接来源。');
+            } else if (jit > 6 || spread > 12) {
+                lines.push('<b>抖动</b>：σ=' + jit.toFixed(1) + 'ms，中等偏大，还有优化空间。');
+            } else {
+                lines.push('<b>抖动</b>：σ=' + jit.toFixed(1) + 'ms，相当稳定。如果手感仍不好，问题可能不在链路。');
+            }
+        }
+
+        if (idle.length > 5 && load.length > 5) {
+            const ji = std(idle), jl = std(load);
+            if (jl > ji * 1.5 && jl - ji > 3) {
+                lines.push('<b>负载影响</b>：空闲 σ=' + ji.toFixed(1) + 'ms，负载 σ=' + jl.toFixed(1) +
+                    'ms，发包时抖动放大 ' + (jl / Math.max(ji, 0.1)).toFixed(1) + ' 倍 —— 说明是空口竞争。降低发包频率可以直接缓解。');
+            } else {
+                lines.push('<b>负载影响</b>：空闲 σ=' + ji.toFixed(1) + 'ms，负载 σ=' + jl +
+                    'ms，发包对抖动影响不大 —— 瓶颈不在发包频率上。');
+            }
+        }
+
+        const gs = std(gapSamples);
+        if (gapSamples.length > 10 && gs > 8) {
+            lines.push('<b>上行到达间隔</b>：σ=' + gs.toFixed(1) +
+                'ms（发包间隔应为 100ms）—— 手机到路由器这一段本身就不稳。手机侧 WiFi 省电模式是首要嫌疑。');
+        }
+
+        if (lostTotal > 0) {
+            lines.push('<b>丢包</b>：' + lostTotal + ' 个探测包超时未回。');
+        }
+
+        if (lines.length === 0) {
+            box.innerHTML = '<div class="l" style="color:var(--muted)">数据还不够，请保持页面打开 30 秒以上…</div>';
+        } else {
+            box.innerHTML = lines.map(s => '<div class="l">' + s + '</div>').join('');
+        }
+    }
+
+    // ── 曲线绘制 ────────────────────────────────────────────
+    const canvas = $('chart');
+    const ctx = canvas.getContext('2d');
+
+    function draw() {
+        const dpr = window.devicePixelRatio || 1;
+        const w = canvas.clientWidth, h = canvas.clientHeight;
+        if (!w || !h) return;
+        if (canvas.width !== Math.round(w * dpr)) {
+            canvas.width = Math.round(w * dpr);
+            canvas.height = Math.round(h * dpr);
+        }
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        ctx.clearRect(0, 0, w, h);
+
+        const padL = 34, padR = 8, padT = 10, padB = 16;
+        const plotW = w - padL - padR, plotH = h - padT - padB;
+
+        let peak = 0;
+        for (const s of samples) if (s.rtt > peak) peak = s.rtt;
+        const yMax = Math.max(30, Math.ceil(peak * 1.15 / 10) * 10);
+
+        // 网格 + y 轴刻度
+        ctx.font = '11px -apple-system, system-ui, sans-serif';
+        ctx.textAlign = 'right';
+        ctx.textBaseline = 'middle';
+        for (let i = 0; i <= 3; i++) {
+            const v = yMax * i / 3;
+            const y = padT + plotH - (i / 3) * plotH;
+            ctx.strokeStyle = '#e6e8ee';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(padL, y + 0.5);
+            ctx.lineTo(padL + plotW, y + 0.5);
+            ctx.stroke();
+            ctx.fillStyle = '#9ca3af';
+            ctx.fillText(v.toFixed(0), padL - 6, y);
+        }
+
+        if (samples.length < 2) {
+            ctx.fillStyle = '#9ca3af';
+            ctx.textAlign = 'center';
+            ctx.fillText('等待数据…', padL + plotW / 2, padT + plotH / 2);
+            return;
+        }
+
+        const now = performance.now();
+        const t0 = now - WINDOW_MS;
+        const X = (t) => padL + Math.max(0, Math.min(1, (t - t0) / WINDOW_MS)) * plotW;
+        const Y = (v) => padT + plotH - Math.max(0, Math.min(1, v / yMax)) * plotH;
+
+        // 平均值参考线
+        const avg = mean(samples.map(s => s.rtt));
+        ctx.strokeStyle = '#d1d5db';
+        ctx.setLineDash([4, 4]);
+        ctx.beginPath();
+        ctx.moveTo(padL, Y(avg));
+        ctx.lineTo(padL + plotW, Y(avg));
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        // 折线
+        ctx.strokeStyle = '#2563eb';
+        ctx.lineWidth = 1.5;
+        ctx.lineJoin = 'round';
+        ctx.beginPath();
+        let started = false;
+        for (const s of samples) {
+            if (s.t < t0) continue;
+            const x = X(s.t), y = Y(s.rtt);
+            if (!started) { ctx.moveTo(x, y); started = true; } else { ctx.lineTo(x, y); }
+        }
+        ctx.stroke();
+
+        // 负载期高亮（红点）
+        ctx.fillStyle = '#dc2626';
+        for (const s of samples) {
+            if (!s.load || s.t < t0) continue;
+            ctx.beginPath();
+            ctx.arc(X(s.t), Y(s.rtt), 1.8, 0, Math.PI * 2);
+            ctx.fill();
+        }
+    }
+
+    // ── 连接事件 ────────────────────────────────────────────
+    socket.on('connect', () => {
+        const el = $('conn');
+        el.textContent = '已连接';
+        el.className = 'badge ok';
+        if (socket.recovered === false && sentTotal > 0) reconnects++;
+    });
+
+    socket.on('disconnect', (reason) => {
+        drops++;
+        const el = $('conn');
+        el.textContent = '已断开';
+        el.className = 'badge bad';
+    });
+
+    try {
+        socket.io.engine.on('upgrade', () => { refreshStats(); });
+    } catch (err) { /* 老版本客户端没有该事件 */ }
+
+    $('reset').addEventListener('click', () => {
+        samples = []; gapSamples = []; lostTotal = 0; sentTotal = 0;
+        drops = 0; reconnects = 0; pending.clear();
+        refreshStats(); refreshVerdict(); draw();
+    });
+
+    setInterval(() => { refreshStats(); refreshVerdict(); }, 500);
+    setInterval(draw, 200);
+    refreshStats();
+})();
+</script>
+</body>
+</html>

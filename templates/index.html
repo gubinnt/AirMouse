@@ -349,9 +349,21 @@
     </div>
 
     <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
-    <script src="/static/js/touchpad.js"></script>
+    <!-- 带版本串：调试期改了 JS，手机浏览器仍会命中旧缓存，加查询串强制重新拉取 -->
+    <script src="/static/js/touchpad.js?v=1.0.3"></script>
     <script>
-        const socket = io();
+        // 重连退避收窄：默认是 1s 起步、最长 5s，链路一抖就留下漫长的"命令真空期"。
+        // 位移已经走 volatile（连接不可用时直接丢、不缓冲），所以把重连间隔压短
+        // 不会带来"重连后一次性补发"的副作用。
+        const socket = io({
+            reconnectionDelay: 100,
+            reconnectionDelayMax: 500,
+            timeout: 4000,
+        });
+
+        // 每次建连（含重连）都让服务端清空残留位移，
+        // 避免断连前攒下的位移在重连瞬间被补上导致光标猛跳。
+        socket.on('connect', () => { socket.emit('reset_move'); });
 
         // 统一反馈系统：震动 + 音效
         let audioCtx = null;

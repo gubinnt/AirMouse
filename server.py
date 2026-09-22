@@ -18,6 +18,7 @@ if platform.system() == 'Darwin':
         # 如果没有安装相应的库或环境不支持，静默失败
         pass
 
+from flask import request
 from web_app import app, socketio, get_all_ip_addresses
 import mouse_service
 import keyboard_service
@@ -43,6 +44,9 @@ threading.Thread(target=status_thread, daemon=True).start()
 def handle_connect():
     os_type = platform.system()
     socketio.emit('os_info', {'os': os_type})
+    # 每次接入（含重连）都留一行日志：重连次数是判断"链路是否在断"最直接的
+    # 指标 —— 每次重连都伴随一段"命令真空期"，而那正是"一顿一顿"的重要来源。
+    print(f'[airmouse] 接入 {request.sid}', flush=True)
 
 @socketio.on('load_macros')
 def handle_load():

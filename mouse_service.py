@@ -59,11 +59,20 @@ mouse = Controller()
 TARGET_FPS = 144
 _FRAME_INTERVAL = 1.0 / TARGET_FPS
 
+# 单帧位移上限（像素）。
+#
+# 正常实时输入下，144Hz 的一帧（6.9ms）里累积的位移远低于这个值；
+# 一旦超过，说明这一帧里塞进了"多个现实帧"的位移 —— 典型场景是链路卡顿
+# 之后，客户端把缓冲的命令一次性补发过来（Socket.IO 默认行为）。
+# 此时按比例压缩到上限：保住方向感，但不让光标"飞"出去。
+MAX_STEP_PX = 1000.0
+
 _pending_dx = 0.0      # 已收到、尚未应用的位移
 _pending_dy = 0.0
 _rem_dx = 0.0          # 亚像素余数，留给下一帧（pynput 会丢弃小数）
 _rem_dy = 0.0
 _pending_lock = threading.Lock()
+_clamped_frames = 0    # 触发过压缩的帧数，供诊断接口读取
 
 
 def handle_move(data):
@@ -93,16 +102,48 @@ def flush_move():
     需要"动作发生在当前正确位置"的场景（点击、拖拽、滚轮）会先调用它，
     否则这些动作可能作用在尚未更新完的位置上。
     """
-    global _rem_dx, _rem_dy
+    global _rem_dx, _rem_dy, _clamped_frames
     dx, dy = _take_pending()
     if not dx and not dy:
         return
+    # 积压保护：单帧位移过大 = 这一帧里混进了"多个现实帧"的位移
+    mag = max(abs(dx), abs(dy))
+    if mag > MAX_STEP_PX:
+        k = MAX_STEP_PX / mag
+        dx *= k
+        dy *= k
+        _clamped_frames += 1
     x, y = dx + _rem_dx, dy + _rem_dy
     ix, iy = int(x), int(y)
     _rem_dx, _rem_dy = x - ix, y - iy
     if ix or iy:
         mouse.move(ix, iy)
         wake_up_cursor()
+
+
+def reset_pending():
+    """丢弃尚未应用的位移。
+
+    客户端每次建连（含重连）都会调用一次，避免把断连前残留的位移在重连
+    瞬间一次性补上 —— 那正是"卡一下、然后光标猛跳一段"的成因之一。
+    """
+    global _pending_dx, _pending_dy, _rem_dx, _rem_dy
+    with _pending_lock:
+        _pending_dx = _pending_dy = 0.0
+        _rem_dx = _rem_dy = 0.0
+
+
+def stats():
+    """运行时统计，供诊断接口读取。"""
+    with _pending_lock:
+        px, py = _pending_dx, _pending_dy
+    return {
+        'pending_dx': px,
+        'pending_dy': py,
+        'clamped_frames': _clamped_frames,
+        'target_fps': TARGET_FPS,
+        'max_step_px': MAX_STEP_PX,
+    }
 
 
 def _render_loop():

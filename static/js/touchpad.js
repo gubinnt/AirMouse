@@ -39,12 +39,27 @@ class Touchpad {
     }
 
     /**
+     * 发送一条位移（volatile）。
+     *
+     * 为什么必须 volatile：链路一抖，Socket.IO 默认会把这些消息**缓冲**下来，
+     * 等重连后一次性补发 —— 手感就是"卡一下、然后光标猛跳一大段"。
+     * 带 volatile 标记的包在连接不可用时**直接丢弃**，不进缓冲。
+     * 对位移来说，丢旧包永远比补发旧包正确：手指早就移到别处了，
+     * 光标再追上去只会让人更迷惑。
+     */
+    _sendMove(dx, dy) {
+        if (!this.socket) return;
+        if (this.socket.volatile) this.socket.volatile.emit('move', { dx, dy });
+        else this.socket.emit('move', { dx, dy });   // 兜底：客户端库过老时没有 volatile
+    }
+
+    /**
      * 立即发送一次位移。
      * 先 flush 缓冲，保证陀螺仪攒下的位移不会插到触摸位移之后，否则光标会回跳。
      */
     _emitMove(dx, dy) {
         this._flushPending();
-        this.socket.emit('move', { dx, dy });
+        this._sendMove(dx, dy);
     }
 
     /**
@@ -71,7 +86,7 @@ class Touchpad {
         if (this.pdx === 0 && this.pdy === 0) return;
         const dx = this.pdx, dy = this.pdy;
         this.pdx = 0; this.pdy = 0;
-        this.socket.emit('move', { dx, dy });
+        this._sendMove(dx, dy);
     }
 
     _handleTouchStart(e) {
