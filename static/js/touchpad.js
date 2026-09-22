@@ -20,6 +20,12 @@ class Touchpad {
         this.longPressTimer = null;
         this.lastMultiTouchTime = 0;
 
+        // 位移发送缓冲。触摸事件本身由浏览器按帧派发，频率已经 <= 屏幕刷新率，
+        // 直接发送不会带来额外延迟；但陀螺仪（devicemotion）是独立于渲染帧的
+        // 传感器数据流，频率可能远高于刷新率，统一走 queueMove() 按帧合并。
+        this.pdx = 0; this.pdy = 0;
+        this._rafId = null;
+
         this._bindEvents();
     }
 
@@ -30,6 +36,42 @@ class Touchpad {
         this.pad.addEventListener('touchmove', e => this._handleTouchMove(e), { passive: false });
         this.pad.addEventListener('touchend', e => this._handleTouchEnd(e));
         this.pad.addEventListener('touchcancel', () => this._handleTouchCancel());
+    }
+
+    /**
+     * 立即发送一次位移。
+     * 先 flush 缓冲，保证陀螺仪攒下的位移不会插到触摸位移之后，否则光标会回跳。
+     */
+    _emitMove(dx, dy) {
+        this._flushPending();
+        this.socket.emit('move', { dx, dy });
+    }
+
+    /**
+     * 按帧合并的位移入口，供高频数据源（陀螺仪 devicemotion）使用。
+     * 位移累积后一次性发出，不丢精度；同一帧内调用多次也只发一条消息。
+     * 触摸路径不走这里 —— 触摸事件本来就按帧派发，直接发没有额外延迟。
+     */
+    queueMove(dx, dy) {
+        this.pdx += dx;
+        this.pdy += dy;
+        if (this._rafId !== null) return;
+        this._rafId = requestAnimationFrame(() => {
+            this._rafId = null;
+            this._flushPending();
+        });
+    }
+
+    /** 把缓冲中的位移立刻发出去（手势结束或需要保证顺序时调用）。 */
+    _flushPending() {
+        if (this._rafId !== null) {
+            cancelAnimationFrame(this._rafId);
+            this._rafId = null;
+        }
+        if (this.pdx === 0 && this.pdy === 0) return;
+        const dx = this.pdx, dy = this.pdy;
+        this.pdx = 0; this.pdy = 0;
+        this.socket.emit('move', { dx, dy });
     }
 
     _handleTouchStart(e) {
@@ -80,7 +122,9 @@ class Touchpad {
         }
 
         // Movement threshold
-        if (Math.hypot(cx - this.sx, cy - this.sy) > 5) {
+        // 用平方比较代替 Math.hypot，省掉热路径上每帧一次的开方
+        const mdx = cx - this.sx, mdy = cy - this.sy;
+        if (mdx * mdx + mdy * mdy > 25) {
             this.hMove = true;
             if (this.longPressTimer) {
                 clearTimeout(this.longPressTimer);
@@ -97,10 +141,10 @@ class Touchpad {
 
         if (this.tCount === 1 || this.tCount === 3) {
             if (Date.now() - this.lastMultiTouchTime > 300) {
-                this.socket.emit('move', {
-                    dx: (cx - this.lx) * sensitivity,
-                    dy: (cy - this.ly) * sensitivity
-                });
+                this._emitMove(
+                    (cx - this.lx) * sensitivity,
+                    (cy - this.ly) * sensitivity
+                );
             }
             this.lx = cx;
             this.ly = cy;
@@ -116,6 +160,7 @@ class Touchpad {
     }
 
     _handleTouchEnd(e) {
+        this._flushPending();
         const prevTCount = this.tCount;
         this.tCount = e.targetTouches.length;
 
@@ -151,6 +196,7 @@ class Touchpad {
     }
 
     _handleTouchCancel() {
+        this._flushPending();
         this.tCount = 0;
         this.maxTCount = 0;
         this.pad.style.background = "";

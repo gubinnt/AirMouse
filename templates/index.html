@@ -444,7 +444,9 @@
             let dy = Math.abs(ry) < deadzone ? 0 : (ry - Math.sign(ry) * deadzone);
 
             if ((dx !== 0 || dy !== 0) && !touchpad.isLocked()) {
-                socket.emit('move', { dx, dy });
+                // 陀螺仪是独立于渲染帧的传感器流，频率可能高于屏幕刷新率，
+                // 走按帧合并，避免每个采样点都占用一条网络消息。
+                touchpad.queueMove(dx, dy);
             }
         }
 
