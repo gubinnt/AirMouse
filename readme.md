@@ -112,6 +112,14 @@ def handle_scroll(data):
 
     
 ## 更新日志
+
+2026-09-22 Windows 单文件版 v1.0.0
+- [x]  新增 Windows 免安装单文件打包，产出 `AirMouseServer.exe`（约 16.5 MB），双击即用、无需装 Python —— [下载](https://github.com/gubinnt/AirMouse/releases/tag/v1.0.0)
+- [x]  修复端口落在系统保留段内导致无法启动：`5888` 可能被 Hyper-V / WSL 划走（本机实测保留段 `5792-5891`），绑定会以 `WSAEACCES (10013)` 失败；现在启动前自动探测端口，被占则向后回退，也可用 `AIRMOUSE_PORT` 指定
+- [x]  修复 Windows 控制台打印 emoji（`print("🚀 ...")`）抛 `UnicodeEncodeError` 导致进程直接退出，启动时把控制台切到 UTF-8
+- [x]  修复打包后证书 / 配置文件相对路径失效：改为首次运行自动把 `cert.pem`、`key.pem`、`macro_configs.json`、`gamepad_configs.json` 释放到 exe 同目录
+- [x]  补入 `gyro/`、`laji/` 下的调试页到 `templates/`，`/t` 与 `/test` 路由不再 500
+
 2026-01-23 Day3
 - [x]  两个手指快速抬起导致识别成鼠标跳转修复
 - [x]  “单指长按拖拽”功能
